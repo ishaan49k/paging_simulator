@@ -21,6 +21,7 @@ class Algorithm(ABC):
         pass
 
 
+
 class FIFO(Algorithm):
     """First-In, First-Out page replacement algorithm."""
     def __init__(self, num_frames: int):
