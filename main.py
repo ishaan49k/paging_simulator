@@ -18,6 +18,7 @@ def main():
     global PAGE_SIZE
     NUM_FRAMES = 50
     PAGE_SIZE = 100
+    TLB_SIZE = 16  # <-- ADD TLB CONFIGURATION
     TRACE_FILE = "traces/realistic_trace.txt"
 
     # --- Setup and Run ---
@@ -25,10 +26,8 @@ def main():
     if not page_trace:
         return
 
-    # The Markov model needs to know all unique pages in advance
     unique_pages = set(page_trace)
 
-    # --- ALGORITHM COMPARISON ---
     algorithms_to_test = [
         FIFO(num_frames=NUM_FRAMES),
         LRU(num_frames=NUM_FRAMES),
@@ -37,19 +36,17 @@ def main():
 
     print("--- Starting Simulation Comparison ---")
     for algorithm in algorithms_to_test:
-        # We create a new simulator for each run to ensure a clean state
         sim = Simulator(
-            num_frames=NUM_FRAMES,
-            # Page size is now handled during trace loading
-            page_size=PAGE_SIZE,
+            num_frames=NUM_FRAMES, 
+            page_size=PAGE_SIZE, 
+            tlb_size=TLB_SIZE,  # <-- PASS TLB SIZE
             algorithm=algorithm
         )
 
-        # --- SPECIAL STEP: Train the predictive model ---
         if isinstance(algorithm, MarkovPredictive):
             algorithm.train(page_trace)
 
-        sim.run(page_trace) # Pass the page trace directly
+        sim.run(page_trace)
         print("-" * 40)
 
 

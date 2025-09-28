@@ -1,5 +1,37 @@
 from typing import Optional, Dict, List
-from algorithms import Algorithm # <-- IMPORT CHANGE
+from algorithms import Algorithm
+from collections import OrderedDict
+
+
+
+
+class TLB:
+    """A Translation Lookaside Buffer (TLB) implemented with an LRU cache."""
+    def __init__(self, size: int):
+        self.size = size
+        self.cache = OrderedDict()
+
+    def lookup(self, virtual_page_num: int) -> int | None:
+        """
+        Look for a page in the TLB. If found (a hit), move it to the
+        end to mark it as most recently used.
+        """
+        if virtual_page_num in self.cache:
+            # TLB Hit: Move to end to signify it's the most recently used
+            self.cache.move_to_end(virtual_page_num)
+            return self.cache[virtual_page_num]
+        return None # TLB Miss
+
+    def add(self, virtual_page_num: int, frame_num: int):
+        """Add a new entry to the TLB, evicting the LRU entry if full."""
+        self.cache[virtual_page_num] = frame_num
+        self.cache.move_to_end(virtual_page_num)
+        if len(self.cache) > self.size:
+            self.cache.popitem(last=False) # Pop the least recently used item
+
+
+
+
 
 class PageTable:
     # (This class remains unchanged from the previous step)
@@ -39,57 +71,77 @@ class Memory:
         return frame_num
 
 class Simulator:
-    """The main simulator engine."""
-    # --- METHOD UPDATED ---
-    def __init__(self, num_frames: int, page_size: int, algorithm: Algorithm):
+    """The main simulator engine, now with a TLB."""
+    def __init__(self, num_frames: int, page_size: int, tlb_size: int, algorithm: 'Algorithm'):
         self.num_frames = num_frames
         self.page_size = page_size
-        self.algorithm = algorithm # <-- OBJECT INSTEAD OF STRING
+        self.algorithm = algorithm
         self.memory = Memory(self.num_frames)
         self.page_table = PageTable()
-        self.stats = {'hits': 0, 'misses': 0, 'total_accesses': 0}
-        print(f"Initialized simulator with {num_frames} frames, page size {page_size}.")
+        self.tlb = TLB(size=tlb_size)
+        
+        # Expanded stats dictionary
+        self.stats = {
+            'total_accesses': 0, 'page_hits': 0, 'page_faults': 0,
+            'tlb_hits': 0, 'tlb_misses': 0
+        }
+        print(f"Initialized simulator with {num_frames} frames, TLB size {tlb_size}.")
 
-    # --- METHOD UPDATED ---
-    def run(self, page_trace: List[int]):
-        """Run the simulation on a given memory trace."""
+    def run(self, page_trace: list[int]):
+        """Run the simulation with the corrected logic."""
         print(f"Starting simulation with {self.algorithm.__class__.__name__} algorithm...")
-
+    
         for virtual_page_num in page_trace:
             self.stats['total_accesses'] += 1
             
-            frame = self.page_table.lookup(virtual_page_num)
+            frame = self.tlb.lookup(virtual_page_num)
 
             if frame is not None:
-                # Page Hit
-                self.stats['hits'] += 1
+                # TLB Hit
+                self.stats['tlb_hits'] += 1
+                self.stats['page_hits'] += 1
                 self.algorithm.page_accessed(virtual_page_num)
             else:
-                # Page Fault (Miss)
-                self.stats['misses'] += 1
+                # TLB Miss
+                self.stats['tlb_misses'] += 1
                 
-                if not self.memory.is_full():
-                    # There is free space in memory
-                    free_frame = self.memory.get_free_frame()
-                    self.memory.load_page(virtual_page_num, free_frame)
-                    self.page_table.update(virtual_page_num, free_frame)
-                    self.algorithm.page_fault(virtual_page_num, self.memory.frames)
+                frame = self.page_table.lookup(virtual_page_num)
+                
+                if frame is not None:
+                    # TLB Miss, but Page Hit
+                    self.stats['page_hits'] += 1
+                    self.algorithm.page_accessed(virtual_page_num)
+                    self.tlb.add(virtual_page_num, frame)
                 else:
-                    # Memory is full, need to evict a page
-                    victim_page = self.algorithm.page_fault(virtual_page_num, self.memory.frames)
+                    # Page Fault
+                    self.stats['page_faults'] += 1
                     
-                    # Evict the victim page
-                    evicted_frame = self.memory.evict_page(victim_page)
-                    self.page_table.evict(victim_page)
-                    
+                    if self.memory.is_full():
+                        # Eviction is necessary
+                        victim_page = self.algorithm.choose_victim(self.memory.frames)
+                        frame = self.memory.evict_page(victim_page)
+                        self.page_table.evict(victim_page)
+                    else:
+                        # There is free space
+                        frame = self.memory.get_free_frame()
+
                     # Load the new page
-                    self.memory.load_page(virtual_page_num, evicted_frame)
-                    self.page_table.update(virtual_page_num, evicted_frame)
-        
+                    self.memory.load_page(virtual_page_num, frame)
+                    self.page_table.update(virtual_page_num, frame)
+                    self.tlb.add(virtual_page_num, frame)
+                    self.algorithm.page_loaded(virtual_page_num)
+
         print("Simulation finished.")
-        hit_rate = (self.stats['hits'] / self.stats['total_accesses']) * 100
+        self.print_results()
+
+    def print_results(self):
+        tlb_hit_rate = (self.stats['tlb_hits'] / self.stats['total_accesses']) * 100
+        page_hit_rate = (self.stats['page_hits'] / self.stats['total_accesses']) * 100
+        
         print(f"--- Results for {self.algorithm.__class__.__name__} ---")
         print(f"Total Accesses: {self.stats['total_accesses']}")
-        print(f"Page Hits:      {self.stats['hits']}")
-        print(f"Page Faults:    {self.stats['misses']}")
-        print(f"Hit Rate:         {hit_rate:.2f}%")
+        print(f"TLB Hits:       {self.stats['tlb_hits']}")
+        print(f"TLB Misses:     {self.stats['tlb_misses']}")
+        print(f"Page Faults:    {self.stats['page_faults']}")
+        print(f"TLB Hit Rate:     {tlb_hit_rate:.2f}%")
+        print(f"Page Hit Rate:    {page_hit_rate:.2f}%")
